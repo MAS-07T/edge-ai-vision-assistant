@@ -13,6 +13,7 @@ Built during the **"No Signal, No Problem"** Local AI workshop by GDG on Campus 
   - `list-events`: list Google Calendar events for a date
   - `create-calendar-event`: create a new calendar event
   - `read-latest-email`: read the latest Gmail message (read-only)
+  - **`daily-briefing` (my addition):** one request returns today's calendar events plus the sender and subject of the newest unread emails, summarized in under 80 words for speech. It reuses the calendar tool and a Gmail `is:unread` search, and fetches only email metadata to stay fast and private.
   - `kitchen-adventure`: a sample bundled skill
 - **Voice in and out:** speech-to-text for input and text-to-speech that reads replies aloud, for accessibility.
 - **Google Sign-In** with scoped OAuth access (Calendar events, Gmail read-only).

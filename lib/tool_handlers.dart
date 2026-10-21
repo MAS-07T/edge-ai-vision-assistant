@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:flutter_gemma_agent/flutter_gemma_agent.dart';
 import 'package:googleapis/calendar/v3.dart' as calendar;
+import 'package:googleapis/gmail/v1.dart' as gmail;
 
 import 'google_auth_service.dart';
 
@@ -18,6 +19,8 @@ class ToolHandlers {
         return listEvents(call.args);
       case 'read-latest-email':
         return readLatestEmail();
+      case 'daily-briefing':
+        return dailyBriefing();
       default:
         return Future.value({'error': 'Unknown tool: ${call.name}'});
     }
@@ -166,6 +169,65 @@ class ToolHandlers {
     }
   }
 
+  // Daily Briefing: today's calendar events + newest unread emails in one call.
+  static Future<Map<String, dynamic>> dailyBriefing() async {
+    try {
+      // 1. Reuse the existing calendar tool to get today's events.
+      final calendarResult = await listEvents({'date': 'today'});
+      if (calendarResult.containsKey('error')) return calendarResult;
+
+      // 2. Ask Gmail for unread emails in the inbox (newest first).
+      final gmailApi = await GoogleAuthService.instance.getGmailApi();
+      final unread = await gmailApi.users.messages.list(
+        'me',
+        q: 'is:unread in:inbox',
+        maxResults: 3,
+      );
+
+      // 3. Fetch only the sender and subject of each unread email.
+      final topUnread = <Map<String, String>>[];
+      for (final m in unread.messages ?? <gmail.Message>[]) {
+        final msg = await gmailApi.users.messages.get(
+          'me',
+          m.id!,
+          format: 'metadata',
+          metadataHeaders: ['Subject', 'From'],
+        );
+
+        String header(String name) {
+          for (final h in msg.payload?.headers ?? <gmail.MessagePartHeader>[]) {
+            if (h.name == name) return h.value ?? '';
+          }
+          return '';
+        }
+
+        // "Jane Doe <jane@example.com>" -> "Jane Doe"
+        final from = header('From').split('<').first.replaceAll('"', '').trim();
+        final subject = header('Subject');
+
+        topUnread.add({
+          'from': from.isEmpty ? 'Unknown sender' : from,
+          'subject': subject.isEmpty ? '(no subject)' : subject,
+        });
+      }
+
+      // 4. Return a small, compact result so the on-device model reads it quickly.
+      return {
+        'date': calendarResult['date'],
+        'eventCount': calendarResult['count'] ?? 0,
+        'events': calendarResult['events'] ?? [],
+        'unreadCount': unread.resultSizeEstimate ?? topUnread.length,
+        'topUnread': topUnread,
+      };
+    } catch (e) {
+      print('❌ Daily Briefing Error: $e');
+      if (e.toString().contains('401') || e.toString().contains('403')) {
+        GoogleAuthService.instance.invalidateClient();
+      }
+      return {'error': 'Failed to build daily briefing: $e'};
+    }
+  }
+
   static Future<Map<String, dynamic>> readLatestEmail() async {
     try {
       final api = await GoogleAuthService.instance.getGmailApi();
@@ -225,6 +287,7 @@ class LocalDartSkillExecutor extends SkillExecutor {
       'list-events',
       'create-calendar-event',
       'read-latest-email',
+      'daily-briefing',
     ].contains(skill.name);
   }
 
@@ -253,6 +316,8 @@ class LocalDartSkillExecutor extends SkillExecutor {
       } else if (skill.name == 'read-latest-email') {
         // You will need to change _readLatestEmail from private to public in ToolHandlers!
         result = await ToolHandlers.readLatestEmail();
+      } else if (skill.name == 'daily-briefing') {
+        result = await ToolHandlers.dailyBriefing();
       } else {
         return ErrorResult('Skill not implemented.');
       }

@@ -28,6 +28,7 @@ const _localSkillNames = [
   'list-events',
   'create-calendar-event',
   'read-latest-email',
+  'daily-briefing',
   'kitchen-adventure',
 ];
 
